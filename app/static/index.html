@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SecureBehave - Login</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font-family:system-ui,Segoe UI,Arial,sans-serif;color:#162033;background:linear-gradient(135deg,#4635d1 0%,#7b5cf0 45%,#2b8fe8 100%);display:flex;align-items:center;justify-content:center;padding:20px}
+.shell{display:grid;grid-template-columns:1.1fr 1fr;width:100%;max-width:940px;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 30px 80px #0003}
+.hero{background:linear-gradient(160deg,#241a7a,#4635d1);color:#fff;padding:48px 40px;display:flex;flex-direction:column;justify-content:center}
+.hero .logo{font-size:44px}.hero h1{margin:14px 0 10px;font-size:30px;line-height:1.2}.hero p{color:#d9d4ff;line-height:1.6;margin:0 0 22px}
+.hero ul{list-style:none;padding:0;margin:0}.hero li{padding:8px 0;color:#eceaff}.hero li:before{content:"\2713";background:#ffffff26;border-radius:50%;display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;margin-right:10px;font-size:13px}
+.panel{padding:40px 36px}
+.tabs{display:flex;background:#f0f1f7;border-radius:12px;padding:4px;margin-bottom:22px}
+.tab{flex:1;padding:11px;border:0;background:transparent;border-radius:9px;font-weight:700;font-size:15px;color:#667085;cursor:pointer;margin:0;width:auto}
+.tab.active{background:#fff;color:#4635d1;box-shadow:0 2px 8px #0001}
+h2{margin:0 0 4px;font-size:22px}.muted{color:#667085;font-size:14px;margin:0 0 14px}
+label{display:block;font-size:13px;font-weight:600;margin-top:12px;color:#344054}
+input{width:100%;padding:12px 14px;margin-top:5px;border-radius:10px;border:1px solid #d0d5dd;font-size:15px;outline:none}
+input:focus{border-color:#4635d1;box-shadow:0 0 0 3px #4635d122}
+.btn{width:100%;margin-top:18px;padding:13px;border:0;border-radius:10px;background:#4635d1;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
+.btn:hover{background:#3a2bb5}.btn:disabled{opacity:.6;cursor:not-allowed}
+.msg{padding:12px;border-radius:10px;background:#eef2ff;margin-top:14px;white-space:pre-wrap;font-size:14px}
+.msg.err{background:#fee4e2;color:#912018}.msg.ok{background:#dcfae6;color:#085d3a}
+.hidden{display:none}
+.link{background:none;border:0;color:#4635d1;font-weight:600;cursor:pointer;padding:0;margin-top:16px;width:auto;font-size:14px}
+.pinbox{margin-top:16px;padding:14px;border:1px dashed #f79009;border-radius:12px;background:#fffaeb}
+@media(max-width:760px){.shell{grid-template-columns:1fr}.hero{padding:28px 24px}.panel{padding:28px 22px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="hero">
+    <div class="logo">&#128274;</div>
+    <h1>AI-Based Secure Login</h1>
+    <p>Not just a password &mdash; you are also recognised by how you type and move your mouse.</p>
+    <ul>
+      <li>Password + Behavioral Biometrics</li>
+      <li>Logistic Regression trust score</li>
+      <li>Anomaly par PIN verification</li>
+    </ul>
+  </div>
+  <div class="panel">
+    <div class="tabs">
+      <button type="button" class="tab active" id="tabLogin">Login</button>
+      <button type="button" class="tab" id="tabSignup">Sign up</button>
+    </div>
+
+    <div id="loginPane">
+      <h2>Welcome back</h2><p class="muted">Log in to your account.</p>
+      <label for="lemail">Email</label><input id="lemail" type="email" placeholder="you@example.com">
+      <label for="lpass">Password</label><input id="lpass" type="password" placeholder="Password">
+      <button type="button" class="btn" id="loginBtn">Login</button>
+      <div id="lmsg" class="msg hidden"></div>
+      <div id="pinbox" class="pinbox hidden">
+        <b>Fallback verification</b>
+        <label for="pin">PIN</label><input id="pin" type="password" placeholder="4-8 digit PIN">
+        <button type="button" class="btn" id="pinBtn">Verify PIN</button>
+      </div>
+      <button type="button" class="link" id="dashBtn">Already logged in? Open Dashboard &rarr;</button>
+    </div>
+
+    <div id="signupPane" class="hidden">
+      <h2>Create account</h2><p class="muted">Create a new account.</p>
+      <label for="rname">Full name</label><input id="rname" placeholder="Your name" autocomplete="off">
+      <label for="remail">Email</label><input id="remail" type="email" placeholder="you@example.com" autocomplete="off">
+      <label for="rpass">Password</label><input id="rpass" type="password" placeholder="Min 8 characters" autocomplete="new-password">
+      <label for="rpin">Fallback PIN</label><input id="rpin" type="password" placeholder="4-8 digits" autocomplete="off">
+      <button type="button" class="btn" id="regBtn">Sign up</button>
+      <div id="rmsg" class="msg hidden"></div>
+    </div>
+  </div>
+</div>
+<script>
+// Works when served by FastAPI (:8000) or by Live Server / any other static server.
+var API = location.port === '8000' ? '' : 'http://127.0.0.1:8000';
+document.addEventListener('DOMContentLoaded', function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var MAX_DURATION = 119000; // backend rejects > 120000 ms
+  var state = {start: null, keyTimes: [], backs: 0, lastMouse: null, mouseDist: 0, mouseMoveMs: 0, challenge: null};
+
+  function tab(which) {
+    var login = which === 'login';
+    $('loginPane').classList.toggle('hidden', !login);
+    $('signupPane').classList.toggle('hidden', login);
+    $('tabLogin').classList.toggle('active', login);
+    $('tabSignup').classList.toggle('active', !login);
+  }
+  $('tabLogin').addEventListener('click', function () { tab('login'); });
+  $('tabSignup').addEventListener('click', function () { tab('signup'); });
+
+  function resetBehavior() {
+    state.start = null; state.keyTimes = []; state.backs = 0;
+    state.lastMouse = null; state.mouseDist = 0; state.mouseMoveMs = 0;
+  }
+  function clamp(v, max) { v = Number(v); return isFinite(v) ? Math.min(Math.max(v, 0), max) : 0; }
+
+  // Timing starts at the first key typed in the login form (not at page load).
+  ['lemail', 'lpass'].forEach(function (id) {
+    $(id).addEventListener('keydown', function (e) {
+      var t = performance.now();
+      if (state.start === null) state.start = t;
+      if (id === 'lpass') {
+        if (e.key === 'Backspace') state.backs++;
+        else if (e.key.length === 1 || e.key === 'Process') state.keyTimes.push(t);
+      }
+    });
+  });
+  document.addEventListener('mousemove', function (e) {
+    var t = performance.now();
+    if (state.lastMouse) {
+      var gap = t - state.lastMouse.t;
+      if (gap < 500) { // ignore idle gaps so speed is not diluted
+        state.mouseDist += Math.hypot(e.clientX - state.lastMouse.x, e.clientY - state.lastMouse.y);
+        state.mouseMoveMs += gap;
+      }
+    }
+    state.lastMouse = {x: e.clientX, y: e.clientY, t: t};
+  });
+
+  function behavior() {
+    var iv = [];
+    for (var i = 1; i < state.keyTimes.length; i++) iv.push(state.keyTimes[i] - state.keyTimes[i - 1]);
+    var avg = iv.length ? iv.reduce(function (a, b) { return a + b; }, 0) / iv.length : 0;
+    var speed = state.mouseMoveMs > 0 ? state.mouseDist / (state.mouseMoveMs / 1000) : 0;
+    var dur = state.start === null ? 0 : performance.now() - state.start;
+    var now = new Date();
+    return {
+      typing_duration: clamp(dur, MAX_DURATION),
+      avg_key_interval: clamp(avg, 9999),
+      backspace_count: Math.floor(clamp(state.backs, 500)),
+      mouse_distance: clamp(state.mouseDist, 499999),
+      avg_mouse_speed: clamp(speed, 99999),
+      login_hour: clamp(now.getHours() + now.getMinutes() / 60, 23.99)
+    };
+  }
+
+  function show(id, msg, kind) { var e = $(id); e.textContent = msg; e.className = 'msg ' + (kind || ''); }
+  function errText(d, status) {
+    if (d && typeof d.detail === 'string') return d.detail;
+    if (d && Array.isArray(d.detail)) {
+      return d.detail.map(function (x) { return ((x.loc || []).slice(1).join('.') || 'input') + ': ' + x.msg; }).join('\n');
+    }
+    return 'Request failed (HTTP ' + status + ')';
+  }
+  async function post(url, body) {
+    var res;
+    try {
+      res = await fetch(API + url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    } catch (e) {
+      return {ok: false, status: 0, data: {detail: 'Cannot connect to the backend. Start it in a terminal: uvicorn app.main:app --reload'}};
+    }
+    var data = null;
+    try { data = await res.json(); } catch (e) { /* non-JSON body */ }
+    if (res.status === 405 || (res.status === 404 && !data)) {
+      return {ok: false, status: res.status, data: {detail: 'Backend not found. Start it in a terminal: uvicorn app.main:app --reload'}};
+    }
+    return {ok: res.ok, status: res.status, data: data || {}};
+  }
+  async function busy(btn, label, fn) {
+    var old = btn.textContent;
+    btn.disabled = true; btn.textContent = label;
+    try { await fn(); }
+    catch (err) { console.error(err); }
+    finally { btn.disabled = false; btn.textContent = old; }
+  }
+  function goDashboard() { setTimeout(function () { location.href = 'dashboard.html'; }, 600); }
+
+  $('regBtn').addEventListener('click', function () {
+    busy($('regBtn'), 'Registering...', async function () {
+      var body = {name: $('rname').value.trim(), email: $('remail').value.trim(), password: $('rpass').value, pin: $('rpin').value.trim()};
+      if (!body.name || !body.email || !body.password || !body.pin) { show('rmsg', 'Please fill in all fields.', 'err'); return; }
+      if (body.name.length < 2) { show('rmsg', 'Name must be at least 2 characters.', 'err'); return; }
+      if (!/^\S+@\S+\.\S+$/.test(body.email)) { show('rmsg', 'Enter a valid email address.', 'err'); return; }
+      if (body.password.length < 8) { show('rmsg', 'Password must be at least 8 characters.', 'err'); return; }
+      if (!/^\d{4,8}$/.test(body.pin)) { show('rmsg', 'PIN must be 4-8 digits.', 'err'); return; }
+      var r = await post('/api/register', body);
+      if (r.ok) {
+        ['rname', 'remail', 'rpass', 'rpin'].forEach(function (i) { $(i).value = ''; });
+        $('lemail').value = body.email;
+        show('rmsg', 'Registration successful! Switching to the Login tab...', 'ok');
+        setTimeout(function () { tab('login'); show('lmsg', 'Account created. Now log in (5 times to build your baseline).', 'ok'); $('lpass').focus(); }, 1200);
+      } else show('rmsg', errText(r.data, r.status), 'err');
+    });
+  });
+
+  $('loginBtn').addEventListener('click', function () {
+    busy($('loginBtn'), 'Logging in...', async function () {
+      var email = $('lemail').value.trim(), password = $('lpass').value;
+      if (!email || !password) { show('lmsg', 'Enter email and password.', 'err'); return; }
+      var r = await post('/api/login', {email: email, password: password, behavior: behavior()});
+      resetBehavior();
+      var d = r.data;
+      if (r.ok && d.requires_pin) {
+        state.challenge = d.challenge_token;
+        $('pinbox').classList.remove('hidden');
+        show('lmsg', 'Behavioral anomaly detected (trust score: ' + d.trust_score + '%).\nEnter your fallback PIN below.', 'err');
+      } else if (r.ok) {
+        localStorage.setItem('session', d.token);
+        $('pinbox').classList.add('hidden');
+        show('lmsg', d.message + (d.trust_score != null ? '\nTrust score: ' + d.trust_score + '%' : '') + '\nOpening dashboard...', 'ok');
+        $('lpass').value = '';
+        goDashboard();
+      } else show('lmsg', errText(d, r.status), 'err');
+    });
+  });
+
+  $('pinBtn').addEventListener('click', function () {
+    busy($('pinBtn'), 'Verifying...', async function () {
+      var pin = $('pin').value.trim();
+      if (!state.challenge) { show('lmsg', 'No verification pending. Log in first.', 'err'); return; }
+      if (!/^\d{4,8}$/.test(pin)) { show('lmsg', 'PIN must be 4-8 digits.', 'err'); return; }
+      var r = await post('/api/verify-pin', {challenge_token: state.challenge, pin: pin});
+      if (r.ok) {
+        localStorage.setItem('session', r.data.token);
+        state.challenge = null;
+        show('lmsg', 'PIN verified. Opening dashboard...', 'ok');
+        $('pin').value = ''; $('lpass').value = '';
+        goDashboard();
+      } else show('lmsg', errText(r.data, r.status), 'err');
+    });
+  });
+
+  $('dashBtn').addEventListener('click', function () {
+    if (!localStorage.getItem('session')) { show('lmsg', 'Please log in first.', 'err'); return; }
+    location.href = 'dashboard.html';
+  });
+
+  // Enter key submits the active form.
+  ['lemail', 'lpass'].forEach(function (id) { $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') $('loginBtn').click(); }); });
+  $('pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('pinBtn').click(); });
+  ['rname', 'remail', 'rpass', 'rpin'].forEach(function (id) { $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') $('regBtn').click(); }); });
+});
+</script></body></html>

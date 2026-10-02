@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SecureBehave - Dashboard</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f3f4fb;margin:0;color:#182230}
+.top{background:linear-gradient(90deg,#241a7a,#4635d1 60%,#2b8fe8);color:#fff;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.top h1{margin:0;font-size:20px}.top small{color:#d9d4ff}
+.wrap{max-width:1000px;margin:0 auto;padding:20px}
+.card{background:#fff;padding:22px;border-radius:16px;margin:16px 0;box-shadow:0 6px 24px #0001}
+.card h2{margin:0 0 12px;font-size:18px}
+button{padding:11px 18px;border:0;border-radius:10px;background:#4635d1;color:#fff;font-weight:700;cursor:pointer;margin:4px 6px 4px 0}
+button:hover{opacity:.92}button.sec{background:#eef0f6;color:#344054}button.danger{background:#d92d20}
+.top button{background:#ffffff26;color:#fff;margin:0 0 0 8px}.top button.danger{background:#d92d20}
+button:disabled{opacity:.6;cursor:not-allowed}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:10px;border-bottom:1px solid #eaecf0;text-align:left}th{color:#667085;font-weight:600;font-size:13px}
+.muted{color:#667085}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.stat{background:linear-gradient(160deg,#f8f9ff,#eef0ff);padding:16px;border-radius:12px;border:1px solid #e3e6fb;word-break:break-word}
+.stat b{font-size:18px}
+#msg,#smsg{white-space:pre-wrap;margin:10px 0 0}#msg.err,#smsg.err{color:#912018}#msg.ok,#smsg.ok{color:#085d3a}code{background:#eef0f6;padding:3px 8px;border-radius:6px}
+@media(max-width:750px){.grid{grid-template-columns:1fr 1fr}}
+</style></head>
+<body>
+<div class="top"><div><h1>&#128274; SecureBehave Dashboard</h1><small>Behavioral biometric login</small></div>
+<div><button type="button" id="refreshBtn">Refresh</button><button type="button" id="backBtn">Login Page</button><button type="button" id="logoutBtn" class="danger">Logout</button></div></div>
+<div class="wrap">
+<div class="card"><div id="stats" class="grid"></div></div>
+<div class="card"><h2>Add Behavior Sample</h2>
+<p class="muted">Type the phrase below at your normal speed, then click "Record Sample". Repeat at least 5 times, then train the model.</p>
+<p><b>Type this:</b> <code id="phrase">secure login demo 2026</code></p>
+<input id="sampleInput" type="text" autocomplete="off" placeholder="Type the phrase here" style="width:100%;padding:12px;border:1px solid #d0d5dd;border-radius:10px;font-size:15px">
+<button type="button" id="sampleBtn">Record Sample</button>
+<span id="sampleCount" class="muted"></span>
+<p id="smsg"></p></div>
+<div class="card"><h2>Model</h2>
+<p class="muted">Train the model after at least 5 normal samples.</p>
+<button type="button" id="trainBtn">Train / Retrain Model</button>
+<div id="modelInfo" class="stat" style="margin-top:12px"></div>
+<p id="msg"></p></div>
+<div class="card"><h2>Recent Login Attempts</h2><div style="overflow:auto"><table><thead><tr><th>Time (UTC)</th><th>Trust</th><th>Prediction</th><th>Status</th><th>Reason</th></tr></thead><tbody id="rows"></tbody></table></div></div>
+</div>
+<script>
+var API = location.port === '8000' ? '' : 'http://127.0.0.1:8000';
+document.addEventListener('DOMContentLoaded', function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var token = localStorage.getItem('session');
+  if (!token) { location.href = 'index.html'; return; }
+  var H = {Authorization: 'Bearer ' + token};
+
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    });
+  }
+  function say(text, kind) { var m = $('msg'); m.textContent = text; m.className = kind || ''; }
+  function errText(d, status) {
+    if (d && typeof d.detail === 'string') return d.detail;
+    return 'Request failed (HTTP ' + status + ')';
+  }
+  function logout() { localStorage.removeItem('session'); location.href = 'index.html'; }
+
+  async function call(url, method) {
+    var res;
+    try { res = await fetch(API + url, {method: method || 'GET', headers: H}); }
+    catch (e) { return {ok: false, status: 0, data: {detail: 'Cannot reach server.'}}; }
+    var data = null;
+    try { data = await res.json(); } catch (e) { /* non-JSON */ }
+    return {ok: res.ok, status: res.status, data: data || {}};
+  }
+
+  async function load() {
+    var r = await call('/api/me');
+    if (r.status === 401) { logout(); return; }
+    if (!r.ok) { say(errText(r.data, r.status), 'err'); return; }
+    var d = r.data;
+    $('stats').innerHTML =
+      '<div class="stat"><b>' + esc(d.user.name) + '</b><br><span class="muted">' + esc(d.user.email) + '</span></div>' +
+      '<div class="stat"><b>' + esc(d.sample_count) + '</b><br><span class="muted">Behavior samples</span></div>' +
+      '<div class="stat"><b>' + (d.model_trained ? 'Yes' : 'No') + '</b><br><span class="muted">Model trained</span></div>' +
+      '<div class="stat"><b>' + esc(d.threshold) + '</b><br><span class="muted">Trust threshold</span></div>';
+    var mi = d.model;
+    $('modelInfo').innerHTML = !mi ? '<b>Model status:</b> not trained yet' :
+      mi.outdated ? '<b>Model status:</b> trained with an older version &mdash; click Train again' :
+      '<b>Model status:</b> trained<br>Accuracy: <b>' + (mi.training_accuracy * 100).toFixed(1) + '%</b> &nbsp;|&nbsp; Samples used: <b>' +
+      esc(mi.samples) + '</b> &nbsp;|&nbsp; Trained at: ' + esc(mi.trained_at) + ' UTC';
+    $('sampleCount').textContent = 'Samples for ' + d.user.email + ': ' + d.sample_count + ' / 5 (minimum). Samples are counted per user.';
+    var l = await call('/api/logs');
+    if (!l.ok) { say(errText(l.data, l.status), 'err'); return; }
+    var logs = l.data.logs || [];
+    $('rows').innerHTML = logs.length ? logs.map(function (x) {
+      return '<tr><td>' + esc(x.created_at) + '</td><td>' + (x.trust_score == null ? '-' : esc(x.trust_score) + '%') +
+        '</td><td>' + esc(x.prediction) + '</td><td>' + esc(x.status) + '</td><td>' + esc(x.reason) + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="muted">No login attempts yet.</td></tr>';
+  }
+
+  async function guarded(btn, label, fn) {
+    var old = btn.textContent; btn.disabled = true; btn.textContent = label;
+    try { await fn(); } catch (e) { console.error(e); say('Unexpected error: ' + e.message, 'err'); }
+    finally { btn.disabled = false; btn.textContent = old; }
+  }
+
+  $('trainBtn').addEventListener('click', function () {
+    guarded($('trainBtn'), 'Training...', async function () {
+      say('Training model...');
+      var r = await call('/api/train', 'POST');
+      if (r.status === 401) { logout(); return; }
+      if (r.ok) {
+        say('Model trained successfully.\nSamples used: ' + r.data.samples +
+            '\nTraining accuracy: ' + (r.data.training_accuracy * 100).toFixed(1) + '%', 'ok');
+      } else say(errText(r.data, r.status), 'err');
+      await load();
+    });
+  });
+  $('refreshBtn').addEventListener('click', function () {
+    guarded($('refreshBtn'), 'Refreshing...', async function () { await load(); say('Refreshed.', 'ok'); });
+  });
+  $('backBtn').addEventListener('click', function () { location.href = 'index.html'; });
+  $('logoutBtn').addEventListener('click', async function () {
+    try { await fetch(API + '/api/logout', {method: 'POST', headers: H}); } catch (e) { /* ignore */ }
+    logout();
+  });
+
+  // ---- Behaviour sample capture (typing box) ----
+  var PHRASE = 'secure login demo 2026';
+  var cap = {start: null, keys: [], backs: 0, last: null, dist: 0, moveMs: 0};
+  function resetCap() { cap = {start: null, keys: [], backs: 0, last: null, dist: 0, moveMs: 0}; }
+  function clampN(v, max) { v = Number(v); return isFinite(v) ? Math.min(Math.max(v, 0), max) : 0; }
+  $('sampleInput').addEventListener('keydown', function (e) {
+    var t = performance.now();
+    if (cap.start === null) cap.start = t;
+    if (e.key === 'Backspace') cap.backs++;
+    else if (e.key.length === 1) cap.keys.push(t);
+    if (e.key === 'Enter') $('sampleBtn').click();
+  });
+  document.addEventListener('mousemove', function (e) {
+    var t = performance.now();
+    if (cap.last && t - cap.last.t < 500) {
+      cap.dist += Math.hypot(e.clientX - cap.last.x, e.clientY - cap.last.y);
+      cap.moveMs += t - cap.last.t;
+    }
+    cap.last = {x: e.clientX, y: e.clientY, t: t};
+  });
+  function sampleBody() {
+    var iv = [];
+    for (var i = 1; i < cap.keys.length; i++) iv.push(cap.keys[i] - cap.keys[i - 1]);
+    var avg = iv.length ? iv.reduce(function (a, b) { return a + b; }, 0) / iv.length : 0;
+    var speed = cap.moveMs > 0 ? cap.dist / (cap.moveMs / 1000) : 0;
+    var now = new Date();
+    return {
+      typing_duration: clampN(cap.start === null ? 0 : performance.now() - cap.start, 119000),
+      avg_key_interval: clampN(avg, 9999),
+      backspace_count: Math.floor(clampN(cap.backs, 500)),
+      mouse_distance: clampN(cap.dist, 499999),
+      avg_mouse_speed: clampN(speed, 99999),
+      login_hour: clampN(now.getHours() + now.getMinutes() / 60, 23.99)
+    };
+  }
+  $('sampleBtn').addEventListener('click', function () {
+    guarded($('sampleBtn'), 'Recording...', async function () {
+      var box = $('sampleInput');
+      if (box.value !== PHRASE) { smsg('Type the phrase exactly: ' + PHRASE, 'err'); return; }
+      var res;
+      try {
+        res = await fetch(API + '/api/behavior/sample', {method: 'POST', headers: Object.assign({'Content-Type': 'application/json'}, H), body: JSON.stringify(sampleBody())});
+      } catch (e) { smsg('Cannot reach server.', 'err'); return; }
+      var d = {}; try { d = await res.json(); } catch (e) { /* non-JSON */ }
+      if (res.status === 401) { logout(); return; }
+      if (res.ok) { smsg(d.message, 'ok'); box.value = ''; resetCap(); await load(); }
+      else smsg(errText(d, res.status), 'err');
+    });
+  });
+  function smsg(text, kind) { var m = $('smsg'); m.textContent = text; m.className = kind || ''; }
+
+  load();
+
+});
+</script></body></html>
